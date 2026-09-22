@@ -3,7 +3,7 @@ name: Build menu image from PDF (auto)
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/30 * * * *' # every 30 minutes; adjust as needed
+    - cron: '*/30 * * * *'
 
 concurrency:
   group: pdf_to_png
@@ -12,13 +12,17 @@ concurrency:
 jobs:
   pdf_to_png:
     runs-on: ubuntu-latest
+
     permissions:
       contents: write
-env:
-  PDF_URLS: |
-    https://qnips.blob.core.windows.net/release-menu-pdfs-static/Menu_Men%C3%BCplan%20Engel%20SCHWERTBERG%20ENG_en_22951.pdf
+
+    env:
+      PDF_URLS: |
+        https://qnips.blob.core.windows.net/release-menu-pdfs-static/Menu_Men%C3%BCplan%20Engel%20SCHWERTBERG%20ENG_en_22951.pdf
+      BRANCH_NAME: ${{ github.event.repository.default_branch }}
+
     steps:
-      - name: Checkout (full history so we can rebase)
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -29,13 +33,15 @@ env:
           sudo apt-get update
           sudo apt-get install -y poppler-utils imagemagick curl coreutils file
 
-      - name: Fetch latest PDF (try candidates, bypass cache)
+      - name: Fetch latest PDF
         run: |
           mkdir -p docs
           ok=""
+
           for u in $PDF_URLS; do
             url="${u}?nocache=$(date +%s)"
             echo "Trying: $u"
+
             if curl -fsSL -H 'Cache-Control: no-cache' -o docs/menu.pdf "$url"; then
               if pdfinfo docs/menu.pdf >/dev/null 2>&1; then
                 echo "Fetched PDF from: $u" | tee docs/source_url.txt
@@ -44,60 +50,69 @@ env:
               fi
             fi
           done
+
           if [ -z "$ok" ]; then
             echo "ERROR: Could not fetch any candidate URL." >&2
             exit 1
           fi
+
           ls -lah docs
 
-      - name: Log detected calendar week (from page 1)
+      - name: Log detected calendar week
         run: |
           KW=$(pdftotext -f 1 -l 1 docs/menu.pdf - | grep -oE 'KW[0-9]+' | head -n 1 || true)
           echo "Detected calendar week in PDF: ${KW:-unknown}"
 
-      - name: Compute PDF hash & compare
+      - name: Compute PDF hash and compare
         id: hash
         run: |
           sha256sum docs/menu.pdf | awk '{print $1}' > docs/menu.sha256.new
+
           if [ -f docs/menu.sha256 ]; then
             if cmp -s docs/menu.sha256.new docs/menu.sha256; then
-              echo "changed=no" >> $GITHUB_OUTPUT
+              echo "changed=no" >> "$GITHUB_OUTPUT"
               exit 0
             fi
           fi
-          echo "changed=yes" >> $GITHUB_OUTPUT
 
-      - name: Convert first page to PNG (keep full page; fit 1920x1080)
+          echo "changed=yes" >> "$GITHUB_OUTPUT"
+
+      - name: Convert first page to PNG
         if: steps.hash.outputs.changed == 'yes'
         run: |
           pdftoppm -f 1 -l 1 -png -rx 300 -ry 300 docs/menu.pdf docs/menu_raw
+
           if [ ! -f docs/menu_raw-1.png ]; then
-            echo "ERROR: docs/menu_raw-1.png not found; conversion failed." >&2
+            echo "ERROR: docs/menu_raw-1.png not found." >&2
             exit 1
           fi
+
           convert docs/menu_raw-1.png \
             -background white -alpha remove -alpha off \
             -resize 1920x1080 \
             -gravity center -extent 1920x1080 \
             docs/menu.png
+
           rm -f docs/menu_raw-*.png
           mv -f docs/menu.sha256.new docs/menu.sha256
+
           ls -lah docs
 
-      - name: Upload PNG as artifact (debug)
+      - name: Upload PNG as artifact
         if: steps.hash.outputs.changed == 'yes'
         uses: actions/upload-artifact@v4
         with:
           name: menu-png
           path: docs/menu.png
 
-      - name: Pull/rebase and push files if changed
+      - name: Pull rebase and push files if changed
         if: steps.hash.outputs.changed == 'yes'
         run: |
-          git config user.name  "github-actions[bot]"
+          git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add -A docs/menu.pdf docs/menu.png docs/menu.sha256 docs/source_url.txt
+
           if git diff --cached --quiet; then
             echo "Nothing to commit"
             exit 0
