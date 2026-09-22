@@ -14,10 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    env:
-      PDF_URLS: |
-        https://qnips.blob.core.windows.net/release-menu-pdfs-static/SCHWERTBERG_Menu%20Engel%20SCHWERTBERG_en.pdf
-      BRANCH_NAME: ${{ github.event.repository.default_branch }}
+env:
+  PDF_URLS: |
+    https://qnips.blob.core.windows.net/release-menu-pdfs-static/Menu_Men%C3%BCplan%20Engel%20SCHWERTBERG%20ENG_en_22951.pdf
     steps:
       - name: Checkout (full history so we can rebase)
         uses: actions/checkout@v4
